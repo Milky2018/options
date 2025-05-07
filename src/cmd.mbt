@@ -1,9 +1,63 @@
 ///|
-pub(open) trait Command: @json.FromJson + ToJson + Default {}
+pub(open) trait LeafCommand: ToJson + @json.FromJson + Default {}
 
 ///|
-pub fn parse[T : Command](argv : ArrayView[String]) -> T {
-  let proto = T::default().to_json().as_object().unwrap()
+struct CommandParser[T] {
+  run : (ArrayView[String]) -> T
+}
+
+///|
+pub fn CommandParser::parse[T](
+  self : CommandParser[T],
+  args : Array[String]
+) -> T {
+  (self.run)(args[:])
+}
+
+///|
+pub fn leaf[T : LeafCommand]() -> CommandParser[T] {
+  { run: fn(args) { parse_leaf(args, T::default()) } }
+}
+
+///|
+pub fn father[T](subs : Array[(String, CommandParser[T])]) -> CommandParser[T] {
+  {
+    run: fn(args) {
+      for pair in subs {
+        let sub_name = pair.0
+        let sub_parser = pair.1
+        let head = args[0]
+        if head == sub_name {
+          return (sub_parser.run)(args[1:])
+        }
+      } else {
+        panic()
+      }
+    },
+  }
+}
+
+///|
+pub fn unit() -> CommandParser[Unit] {
+  { run: fn(_args) { return () } }
+}
+
+///|
+pub fn CommandParser::map[Sub, T](
+  self : CommandParser[Sub],
+  builder : (Sub) -> T
+) -> CommandParser[T] {
+  { run: fn(args) { builder((self.run)(args)) } }
+}
+
+///|
+pub fn unit_map[T](builder : T) -> CommandParser[T] {
+  { run: fn(_args) { builder } }
+}
+
+///|
+fn parse_leaf[T : LeafCommand](argv : ArrayView[String], proto : T) -> T {
+  let proto = proto.to_json().as_object().unwrap()
   loop argv[:] {
     [x, .. xs] =>
       match proto[x] {
@@ -35,44 +89,4 @@ pub fn parse[T : Command](argv : ArrayView[String]) -> T {
   } catch {
     _ => panic()
   }
-}
-
-///|
-pub(open) trait RootCommand: @json.FromJson + ToJson {}
-
-///|
-struct SubcommandParser[T] {
-  argv : ArrayView[String]
-  mut possible : T?
-}
-
-///|
-pub fn SubcommandParser::new[T : RootCommand](
-  argv : ArrayView[String]
-) -> SubcommandParser[T] {
-  { argv, possible: None }
-}
-
-///|
-pub fn subcommand[S : Command, T : RootCommand](
-  self : SubcommandParser[T],
-  cmd : String,
-  builder : (S) -> T
-) -> SubcommandParser[T] {
-  match self.argv {
-    [x, .. xs] =>
-      if cmd == x.to_string() {
-        let s = parse(xs)
-        self.possible = Some(builder(s))
-        self
-      } else {
-        self
-      }
-    [] => self
-  }
-}
-
-///|
-pub fn SubcommandParser::parse[T](self : SubcommandParser[T]) -> T {
-  self.possible.unwrap()
 }

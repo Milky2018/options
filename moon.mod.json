@@ -8,6 +8,6 @@
   "repository": "",
   "license": "Apache-2.0",
   "keywords": ["CLI", "argument parser", "command line"],
-  "description": "",
+  "description": "Command line argument parser for MoonBit",
   "source": "src"
 }
