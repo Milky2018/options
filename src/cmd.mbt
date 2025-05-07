@@ -2,8 +2,20 @@
 pub(open) trait LeafCommand: ToJson + @json.FromJson + Default {}
 
 ///|
+priv type! ParseError {
+  NoSubcommandFoundError
+  NoSubcommandMatchError
+  MissingArgumentError(String)
+  UnknownArgumentError(String)
+  DecodeError(@json.JsonDecodeError)
+  InvalidCommandError
+  NoPositionalFieldError
+  PositionalIsNotArrayError
+} derive(Show)
+
+///|
 struct CommandParser[T] {
-  run : (ArrayView[String]) -> T
+  run : (ArrayView[String]) -> T!ParseError
 }
 
 ///|
@@ -11,27 +23,49 @@ pub fn CommandParser::parse[T](
   self : CommandParser[T],
   args : Array[String]
 ) -> T {
-  (self.run)(args[:])
+  try {
+    (self.run)!(args[:])
+  } catch {
+    e => {
+      println(e)
+      panic()
+    }
+  }
+}
+
+///|
+pub fn CommandParser::parse_terminated[T](self : CommandParser[T]) -> T {
+  try {
+    (self.run)!(get_cli_args()[2:])
+  } catch {
+    e => {
+      println(e)
+      panic()
+    }
+  }
 }
 
 ///|
 pub fn leaf[T : LeafCommand]() -> CommandParser[T] {
-  { run: fn(args) { parse_leaf(args, T::default()) } }
+  { run: fn(args) { parse_leaf!(args, T::default()) } }
 }
 
 ///|
 pub fn father[T](subs : Array[(String, CommandParser[T])]) -> CommandParser[T] {
   {
     run: fn(args) {
+      if args.length() == 0 {
+        raise NoSubcommandFoundError
+      }
+      let head = args[0]
       for pair in subs {
         let sub_name = pair.0
         let sub_parser = pair.1
-        let head = args[0]
         if head == sub_name {
-          return (sub_parser.run)(args[1:])
+          return (sub_parser.run)!(args[1:])
         }
       } else {
-        panic()
+        raise NoSubcommandMatchError
       }
     },
   }
@@ -47,7 +81,7 @@ pub fn CommandParser::map[Sub, T](
   self : CommandParser[Sub],
   builder : (Sub) -> T
 ) -> CommandParser[T] {
-  { run: fn(args) { builder((self.run)(args)) } }
+  { run: fn(args) { builder((self.run)!(args)) } }
 }
 
 ///|
@@ -56,8 +90,11 @@ pub fn unit_map[T](builder : T) -> CommandParser[T] {
 }
 
 ///|
-fn parse_leaf[T : LeafCommand](argv : ArrayView[String], proto : T) -> T {
-  let proto = proto.to_json().as_object().unwrap()
+fn parse_leaf[T : LeafCommand](
+  argv : ArrayView[String],
+  proto : T
+) -> T!ParseError {
+  let proto = proto.to_json().as_object().or_error!(InvalidCommandError)
   loop argv[:] {
     [x, .. xs] =>
       match proto[x] {
@@ -71,14 +108,19 @@ fn parse_leaf[T : LeafCommand](argv : ArrayView[String], proto : T) -> T {
                 proto[x] = Json::string(y)
                 continue ys
               }
-              _ => panic()
+              _ => raise MissingArgumentError(x)
             }
           } else {
-            panic()
+            raise UnknownArgumentError(x)
           }
         None => {
-          let positionals = proto["positionals"].unwrap()
-          positionals.as_array().unwrap().push(Json::string(x))
+          let positionals = proto["positionals"].or_error!(
+            NoPositionalFieldError,
+          )
+          positionals
+          .as_array()
+          .or_error!(PositionalIsNotArrayError)
+          .push(Json::string(x))
           continue xs
         }
       }
@@ -87,6 +129,11 @@ fn parse_leaf[T : LeafCommand](argv : ArrayView[String], proto : T) -> T {
   try {
     @json.from_json!(proto.to_json())
   } catch {
-    _ => panic()
+    e => raise DecodeError(e)
   }
+}
+
+///|
+pub fn get_cli_args() -> Array[String] {
+  @sys.get_cli_args()
 }
