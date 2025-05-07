@@ -7,7 +7,7 @@
   "readme": "README.md",
   "repository": "",
   "license": "Apache-2.0",
-  "keywords": [],
+  "keywords": ["CLI", "argument parser", "command line"],
   "description": "",
   "source": "src"
 }
